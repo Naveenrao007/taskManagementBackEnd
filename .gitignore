@@ -1,0 +1,11 @@
+node_modules/
+.env
+dist/
+build/
+*.log
+coverage/
+tmp/
+.vscode/
+.idea/
+.nyc_output/
+.DS_Store
