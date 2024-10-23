@@ -4,7 +4,7 @@ const bcrypt = require("bcrypt");
 const jsonwebtoken = require("jsonwebtoken");
 const User = require("../schema/user.shcema");
 
-//  registration 
+// registration  func
 router.post("/register", async (req, res) => {
     console.log(req.body);
     const { name, email, password } = req.body;
@@ -28,24 +28,20 @@ router.post("/register", async (req, res) => {
     }
 });
 
-//  login 
+// login  func
 router.post("/login", async (req, res) => {
     const { email, password } = req.body;
-
     try {
         const user = await User.findOne({ email });
         if (!user) {
             return res.status(400).json({ message: "Wrong email or password" });
         }
-
-        const isPasswordMatch = await bcrypt.compare(password, user.password);
+        const isPasswordMatch =  bcrypt.compare(password, user.password);
         if (!isPasswordMatch) {
             return res.status(400).json({ message: "Wrong email or password" });
         }
-
-        const payload = { id: user._id };
+        const payload = { email: user.email };
         const token = jsonwebtoken.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
-
         return res.status(200).json({
             message: "User logged in successfully",
             token: token
@@ -54,5 +50,4 @@ router.post("/login", async (req, res) => {
         return res.status(500).json({ message: "Internal Server Error" });
     }
 });
-
 module.exports = router;
