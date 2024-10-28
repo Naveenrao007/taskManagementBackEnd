@@ -9,25 +9,39 @@ const User = require('../schema/user.shcema')
 const Dashboard = require('../schema/dashboard.schema')
 router.get("/board", authMiddleware, async (req, res) => {
     try {
-        const createdByUserId = await getUserIdByEmail(req.user);        const dashboard = await Dashboard.findOne({ createdBy: createdByUserId });
+        const createdByUserId = (await getUserIdByEmail(req.user)).toString();
+        console.log("User ID:", createdByUserId);
 
+        // Fetch user name first to ensure it’s available in both cases
+        const user = await User.findById(createdByUserId).select('name');
+        const userName = user ? user.name : "Unknown User";
+
+        // Find dashboard data if it exists
+        const dashboard = await Dashboard.findOne({ createdBy: new mongoose.Types.ObjectId(createdByUserId) }).lean();
+
+        // Return response based on whether dashboard exists or not
         if (!dashboard) {
-            return res.status(404).json({ message: "No dashboard found for this user" });
+            return res.status(200).json({
+                message: "No dashboard found for this user",
+                data: {
+                    dashboard: {}, // Send empty object when no dashboard is found
+                    userName
+                }
+            });
         }
 
         res.status(200).json({
             message: "Data fetched successfully",
-            dashboardData: dashboard 
+            data: {
+                dashboard,
+                userName
+            }
         });
     } catch (error) {
         console.error("Error fetching dashboard data:", error);
         res.status(500).json({ message: "Internal Server error" });
     }
 });
-
-   
-
-
 
 
 router.post("/create", authMiddleware, async (req, res) => {
@@ -69,7 +83,7 @@ router.post("/create", authMiddleware, async (req, res) => {
             assignTo: userId ? new mongoose.Types.ObjectId(userId) : null,
             date,
             checkList: formattedCheckList,
-            createdBy: createdByUserId // Adding createdBy field
+            createdBy: createdByUserId 
         };
 
         let dashboard = await Dashboard.findOne({ createdBy: createdByUserId });
