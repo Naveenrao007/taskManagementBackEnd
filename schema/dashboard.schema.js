@@ -19,8 +19,7 @@ const DashboardSchema = new mongoose.Schema({
          },
          status: {
             type: String,
-            enum: ['backlog', 'inprogress', 'done'],
-            required: true
+            enum: ['Todo', 'Inprogress', 'Done'],
          },
 
       }
@@ -39,7 +38,12 @@ const DashboardSchema = new mongoose.Schema({
          ],
          date: {
             type: Date,
+         },
+         status: {
+            type: String,
+            enum: ['Backlog', 'Inprogress', 'Done'],
          }
+
       }
    ],
    Inprogress: [
@@ -57,7 +61,12 @@ const DashboardSchema = new mongoose.Schema({
          date: {
             type: Date,
          
-         }
+         },
+         status: {
+            type: String,
+            enum: ['Todo', 'Backlog', 'Done'],
+         },
+
       }
    ],
    Done: [
@@ -74,7 +83,12 @@ const DashboardSchema = new mongoose.Schema({
          ],
          date: {
             type: Date,
-         }
+         },
+         status: {
+            type: String,
+            enum: ['Todo', 'Inprogress', 'Backlog'],
+         },
+
       }
    ],
 });
