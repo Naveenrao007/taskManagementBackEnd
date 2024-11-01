@@ -36,15 +36,15 @@ router.get("/board", authMiddleware, async (req, res) => {
                 };
 
                 if (dashboard.Backlog) {
-                    dashboard.Backlog.name = 'Backlog'; 
+                    dashboard.Backlog.name = 'Backlog';
                     pushUniqueTasks(dashboard.Backlog);
                 }
                 if (dashboard.Todo) {
-                    dashboard.Todo.name = 'Todo'; 
+                    dashboard.Todo.name = 'Todo';
                     pushUniqueTasks(dashboard.Todo);
                 }
                 if (dashboard.Inprogress) {
-                    dashboard.Inprogress.name = 'InProgress'; 
+                    dashboard.Inprogress.name = 'InProgress';
                     pushUniqueTasks(dashboard.Inprogress);
                 }
                 if (dashboard.Done) {
@@ -74,7 +74,9 @@ router.get("/board", authMiddleware, async (req, res) => {
                 message: "No dashboards found for this user",
                 data: {
                     dashboard: {},
-                    userName
+                    userName,
+                    email: req.user
+
                 }
             });
         }
@@ -83,7 +85,8 @@ router.get("/board", authMiddleware, async (req, res) => {
             message: "Data fetched successfully",
             data: {
                 dashboard: combinedDashboard,
-                userName
+                userName,
+                email: req.user
             }
         });
     } catch (error) {
@@ -267,29 +270,35 @@ router.delete("/deleteTask", authMiddleware, async (req, res) => {
 });
 
 router.get("/getTask", async (req, res) => {
-    const { taskId, fromArray } = req.query;
-    console.log(req.query);
-
+    const {taskId, fromArray} = req.query
     try {
-        const createdByUserId = (await getUserIdByEmail(req.user)).toString();
+        const dashboards = await Dashboard.find();
 
-
-        const dashboards = await Dashboard.find({ createdBy: createdByUserId });
+        let foundTask = null;
 
         for (const dashboard of dashboards) {
-            const task = dashboard[fromArray].find(task => task._id.toString() === taskId);
-            if (task) {
-                console.log(task);
-                return res.status(200).json({ message: "Task retrieved successfully", data: task });
+            if (dashboard[fromArray]) {
+                const task = dashboard[fromArray].find(task => task._id.toString() === taskId);
+                if (task) {
+                    foundTask = task;
+                    break;
+                }
+            } else {
+                console.warn(`Array ${fromArray} not found in dashboard ID: ${dashboard._id}`);
             }
         }
 
-
-        return res.status(404).json({ message: "Task not found in any dashboard" });
+        if (foundTask) {
+            console.log("Task found:", foundTask);
+            return res.status(200).json({ message: "Task retrieved successfully", data: foundTask });
+        } else {
+            return res.status(404).json({ message: "Task not found in any dashboard" });
+        }
     } catch (error) {
         console.error("Error retrieving task:", error);
-        res.status(500).json({ message: "Internal Server Error" });
+        return res.status(500).json({ message: "Internal Server Error" });
     }
+
 });
 
 router.post("/adduser", authMiddleware, async (req, res) => {
