@@ -5,6 +5,7 @@ const jsonwebtoken = require("jsonwebtoken");
 const User = require("../schema/user.shcema");
 const authMiddleware = require('../middleware/Auth')
 const isAuth = require('../utils/index')
+const { getUserIdByEmail } = require("../utils/index")
 
 // registration  func
 router.post("/register", async (req, res) => {
@@ -55,8 +56,9 @@ router.post("/login", async (req, res) => {
 });
 router.get("/all", authMiddleware, async (req, res) => {
     try {
-     const users = await User.find().select("-password -_id -__v")
-        res.status(200).json({users:users})
+        const users = await User.find().select("-password -_id -__v")
+        console.log("users", users)
+        res.status(200).json({ users: users })
     } catch (error) {
         res.status(500).json({ error: "An error occurred while fetching users." });
 
@@ -64,30 +66,44 @@ router.get("/all", authMiddleware, async (req, res) => {
 })
 // userdata update func
 router.post("/update", authMiddleware, async (req, res) => {
-    const { name, email, password } = req.body
-    const user = await User.findOne()
+    const { name, email, oldPassword, newPassword } = req.body;
+    const createdByUserId = (await getUserIdByEmail(req.user)).toString();
     try {
+        const user = await User.findById(createdByUserId);
+        if (!user) {
+            return res.status(404).json({ message: "User not found." });
+        }
         if (name && name !== "") {
-            user.name = name
-            await user.save()
-            return res.status(201).json({ message: "Name updated successfully." })
+            user.name = name;
+            await user.save();
+            return res.status(201).json({ user, message: "Name updated successfully." });
         }
-        if (email && email !== "") {
-            user.email = email
-            await user.save()
-            return res.status(201).json({ message: "email updated successfully." })
-        }
-        if (password && password !== "") {
-            const hashedPassword = await bcrypt.hash(password, 10)
-            user.password = hashedPassword
-            await user.save()
-            return res.status(201).json({ message: "password updated successfully." })
-        }
-        return res.status(400).json({ message: "No valid field provided" })
-    } catch (error) {
-        return res.status(500).json({ message: "Internal server error" })
 
+        if (email && email !== "") {
+            user.email = email;
+            await user.save();
+            return res.status(201).json({ message: "Email updated successfully." });
+        }
+
+        if (oldPassword && newPassword) {
+            const isMatch = await bcrypt.compare(oldPassword, user.password);
+            if (!isMatch) {
+                return res.status(401).json({ message: "Old password is incorrect." });
+            }
+            if (oldPassword === newPassword) {
+                return res.status(400).json({ message: "New password cannot be the same as the old password." });
+            }
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            user.password = hashedPassword;
+            await user.save();
+            return res.status(201).json({ message: "Password updated successfully." });
+        }
+        return res.status(400).json({ message: "No valid field provided for update." });
+    } catch (error) {
+        console.error("Error updating user data:", error);
+        return res.status(500).json({ message: "Internal server error" });
     }
+
 })
 
 module.exports = router;

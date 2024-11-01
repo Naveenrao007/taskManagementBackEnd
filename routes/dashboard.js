@@ -4,19 +4,74 @@ const bcrypt = require("bcrypt");
 const jsonwebtoken = require("jsonwebtoken");
 const mongoose = require("mongoose")
 const authMiddleware = require("../middleware/Auth");
-const { getUserIdByEmail } = require("../utils");
+const { getUserIdByEmail } = require("../utils/index");
 const User = require('../schema/user.shcema')
 const Dashboard = require('../schema/dashboard.schema')
 router.get("/board", authMiddleware, async (req, res) => {
     try {
         const createdByUserId = (await getUserIdByEmail(req.user)).toString();
-        const user = await User.findById(createdByUserId).select('name');
+        const user = await User.findById(createdByUserId);
         const userName = user ? user.name : "Unknown User";
-        const dashboard = await Dashboard.findOne({ createdBy: new mongoose.Types.ObjectId(createdByUserId) }).lean();
 
-        if (!dashboard) {
+        const userDashboard = await Dashboard.findOne({ createdBy: new mongoose.Types.ObjectId(createdByUserId) });
+
+        const combinedDashboard = {
+            Todo: [],
+            InProgress: [],
+            Backlog: [],
+            Done: []
+        };
+
+        const uniqueTaskIds = new Set();
+
+        const mergeDashboards = (dashboard) => {
+            if (dashboard) {
+                const pushUniqueTasks = (taskArray) => {
+                    taskArray.forEach(task => {
+                        if (!uniqueTaskIds.has(task._id.toString())) {
+                            uniqueTaskIds.add(task._id.toString());
+                            combinedDashboard[taskArray.name].push(task);
+                        }
+                    });
+                };
+
+                if (dashboard.Backlog) {
+                    dashboard.Backlog.name = 'Backlog'; 
+                    pushUniqueTasks(dashboard.Backlog);
+                }
+                if (dashboard.Todo) {
+                    dashboard.Todo.name = 'Todo'; 
+                    pushUniqueTasks(dashboard.Todo);
+                }
+                if (dashboard.Inprogress) {
+                    dashboard.Inprogress.name = 'InProgress'; 
+                    pushUniqueTasks(dashboard.Inprogress);
+                }
+                if (dashboard.Done) {
+                    dashboard.Done.name = 'Done';
+                    pushUniqueTasks(dashboard.Done);
+                }
+            }
+        };
+
+        if (userDashboard) {
+            mergeDashboards(userDashboard);
+        }
+
+        const assignedDashboards = await Dashboard.find({ Access: createdByUserId });
+
+        assignedDashboards.forEach(assignedDashboard => {
+            mergeDashboards(assignedDashboard);
+        });
+
+        if (
+            combinedDashboard.Todo.length === 0 &&
+            combinedDashboard.InProgress.length === 0 &&
+            combinedDashboard.Backlog.length === 0 &&
+            combinedDashboard.Done.length === 0
+        ) {
             return res.status(200).json({
-                message: "No dashboard found for this user",
+                message: "No dashboards found for this user",
                 data: {
                     dashboard: {},
                     userName
@@ -27,7 +82,7 @@ router.get("/board", authMiddleware, async (req, res) => {
         res.status(200).json({
             message: "Data fetched successfully",
             data: {
-                dashboard,
+                dashboard: combinedDashboard,
                 userName
             }
         });
@@ -40,8 +95,6 @@ router.get("/board", authMiddleware, async (req, res) => {
 
 router.post("/create", authMiddleware, async (req, res) => {
     const { title, priority, assignTo, date, checklist } = req.body;
-
-
     const createdByUserId = (await getUserIdByEmail(req.user)).toString();
     const user = await User.findById(createdByUserId).select('name');
     const userName = user ? user.name : "Unknown User";
@@ -88,36 +141,49 @@ router.post("/create", authMiddleware, async (req, res) => {
         dashboard.Todo.push(newCard);
         await dashboard.save();
 
-        res.status(201).json({ message: "Card added to Todo", card: newCard });
+        res.status(201).json({
+            message: "Card added to Todo", data: {
+                dashboard,
+                userName
+            }
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Internal Server error" });
     }
 });
 
-
 router.put("/updateTaskStatus", authMiddleware, async (req, res) => {
-    const { dashboardId, taskId, fromArray, toArray } = req.body;
+    const { taskId, fromArray, toArray } = req.body;
 
     try {
-        const dashboard = await Dashboard.findById(dashboardId);
-        if (!dashboard) {
-            return res.status(404).json({ message: "Dashboard not found" });
+        const createdByUserId = (await getUserIdByEmail(req.user)).toString();
+        const user = await User.findById(createdByUserId).select('name');
+        const userName = user ? user.name : "Unknown User";
+
+        const dashboards = await Dashboard.find({ createdBy: createdByUserId });
+
+
+        let taskFound = false;
+
+        for (const dashboard of dashboards) {
+            const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
+            if (taskIndex !== -1) {
+                const task = dashboard[fromArray][taskIndex];
+                console.log("Task found:", task);
+
+                dashboard[fromArray].splice(taskIndex, 1);
+                dashboard[toArray].push(task);
+
+                await dashboard.save();
+
+                taskFound = true;
+                return res.status(200).json({ message: "Task status updated successfully", data: { dashboard, userName } });
+            }
         }
-
-        const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
-        if (taskIndex === -1) {
-            return res.status(404).json({ message: "Task not found" });
+        if (!taskFound) {
+            return res.status(404).json({ message: "Task not found in any dashboard" });
         }
-
-        const task = dashboard[fromArray][taskIndex];
-        console.log(task)
-        dashboard[fromArray].splice(taskIndex, 1);
-        dashboard[toArray].push(task);
-
-        await dashboard.save();
-
-        res.status(200).json({ message: "Task status updated successfully", data: { dashboard } });
     } catch (error) {
         console.error("Error updating task status:", error);
         res.status(500).json({ message: "Internal Server error" });
@@ -125,61 +191,143 @@ router.put("/updateTaskStatus", authMiddleware, async (req, res) => {
 });
 
 router.put("/UpdateTask", authMiddleware, async (req, res) => {
-    const { dashboardId, taskId, fromArray, taskData } = req.body; 
-    console.log("req.body", { dashboardId, taskId, fromArray, taskData });
-    
-    try {   
-        const dashboard = await Dashboard.findById(dashboardId);
-        if (!dashboard) {
-            return res.status(404).json({ message: "Dashboard not found" });
+    const { taskId, fromArray, taskData } = req.body;
+    console.log("req.body", { taskId, fromArray, taskData });
+
+    try {
+        const createdByUserId = (await getUserIdByEmail(req.user)).toString();
+        const user = await User.findById(createdByUserId).select('name');
+        const userName = user ? user.name : "Unknown User";
+
+
+        const dashboards = await Dashboard.find({ createdBy: createdByUserId });
+
+        let taskUpdated = false;
+
+        for (const dashboard of dashboards) {
+            const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
+            if (taskIndex !== -1) {
+                const task = dashboard[fromArray][taskIndex];
+                task.title = taskData.title;
+                task.priority = taskData.priority;
+                task.checkList = taskData.checkList;
+
+                await dashboard.save();
+                taskUpdated = true;
+
+                return res.status(200).json({ message: "Task updated successfully", data: { dashboard, userName } });
+            }
         }
 
-        const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
-        if (taskIndex === -1) {
-            return res.status(404).json({ message: "Task not found" });
+
+        if (!taskUpdated) {
+            return res.status(404).json({ message: "Task not found in any dashboard" });
         }
-
-        const task = dashboard[fromArray][taskIndex];
-        task.title = taskData.title;
-        task.priority = taskData.priority;
-        task.checkList = taskData.checkList; 
-
-        await dashboard.save();
-
-        res.status(200).json({ message: "Task updated successfully", data: { dashboard } });
     } catch (error) {
         console.error("Error updating task:", error);
         res.status(500).json({ message: "Internal Server Error" });
     }
 });
 
+
 router.delete("/deleteTask", authMiddleware, async (req, res) => {
-    console.log(req.body)
-    const { dashboardId, taskId, fromArray } = req.body;
+    console.log(req.body);
+    const { taskId, fromArray } = req.body;
 
     try {
-        const dashboard = await Dashboard.findById(dashboardId);
         const createdByUserId = (await getUserIdByEmail(req.user)).toString();
         const user = await User.findById(createdByUserId).select('name');
         const userName = user ? user.name : "Unknown User";
-        if (!dashboard) {
-            return res.status(404).json({ message: "Dashboard not found" });
+
+
+        const dashboards = await Dashboard.find({ createdBy: createdByUserId });
+
+        let taskDeleted = false;
+
+
+        for (const dashboard of dashboards) {
+            const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
+            if (taskIndex !== -1) {
+                dashboard[fromArray].splice(taskIndex, 1);
+                await dashboard.save();
+                taskDeleted = true;
+
+                return res.status(200).json({ message: "Task deleted successfully", data: { dashboard, userName } });
+            }
         }
 
-        const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
-        if (taskIndex === -1) {
-            return res.status(404).json({ message: "Task not found" });
+
+        if (!taskDeleted) {
+            return res.status(404).json({ message: "Task not found in any dashboard" });
         }
-        dashboard[fromArray].splice(taskIndex, 1);
-        await dashboard.save();
-        res.status(200).json({ message: "Task deleted successfully", data: { dashboard ,userName} });
     } catch (error) {
         console.error("Error deleting task:", error);
         res.status(500).json({ message: "Internal Server Error" });
     }
-
 });
 
+router.get("/getTask", async (req, res) => {
+    const { taskId, fromArray } = req.query;
+    console.log(req.query);
+
+    try {
+        const createdByUserId = (await getUserIdByEmail(req.user)).toString();
+
+
+        const dashboards = await Dashboard.find({ createdBy: createdByUserId });
+
+        for (const dashboard of dashboards) {
+            const task = dashboard[fromArray].find(task => task._id.toString() === taskId);
+            if (task) {
+                console.log(task);
+                return res.status(200).json({ message: "Task retrieved successfully", data: task });
+            }
+        }
+
+
+        return res.status(404).json({ message: "Task not found in any dashboard" });
+    } catch (error) {
+        console.error("Error retrieving task:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+router.post("/adduser", authMiddleware, async (req, res) => {
+    const { email } = req.body;
+    console.log("Logged-in user:", req.user);
+
+    try {
+        const createdByUserId = await getUserIdByEmail(req.user);
+        if (!createdByUserId) {
+            return res.status(404).json({ message: "Creator user not found" });
+        }
+
+        const dashboard = await Dashboard.findOne({ createdBy: new mongoose.Types.ObjectId(createdByUserId) });
+        if (!dashboard) {
+            return res.status(404).json({ message: "Dashboard not found" });
+        }
+
+        const addUserId = await getUserIdByEmail(email);
+        if (!addUserId) {
+            return res.status(404).json({ message: "User not found with the provided email" });
+        }
+
+        const addUserIdObject = new mongoose.Types.ObjectId(addUserId);
+
+        if (dashboard.Access.some(id => id.equals(addUserIdObject))) {
+            return res.status(409).json({ message: "User already has access to the dashboard" });
+        }
+
+        dashboard.Access.push(addUserIdObject);
+        await dashboard.save();
+
+        res.status(200).json({ message: "Email added to dashboard access successfully", email });
+    } catch (error) {
+        console.error("Error adding email to dashboard access:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+
+});
 
 
 module.exports = router;
