@@ -7,6 +7,8 @@ const authMiddleware = require("../middleware/Auth");
 const { getUserIdByEmail } = require("../utils/index");
 const User = require('../schema/user.shcema')
 const Dashboard = require('../schema/dashboard.schema')
+const { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } = require('date-fns');
+
 router.get("/board", authMiddleware, async (req, res) => {
     try {
         const createdByUserId = (await getUserIdByEmail(req.user)).toString();
@@ -24,59 +26,59 @@ router.get("/board", authMiddleware, async (req, res) => {
 
         const uniqueTaskIds = new Set();
 
+        const dateRange = req.query.dateRange || "thisweek";
+        const now = new Date();
+        let startDate, endDate;
+
+        if (dateRange === "thismonth") {
+            startDate = startOfMonth(now);
+            endDate = endOfMonth(now);
+        } else if (dateRange === "thisyear") {
+            startDate = startOfYear(now);
+            endDate = endOfYear(now);
+        } else {
+            startDate = startOfWeek(now);
+            endDate = endOfWeek(now);
+        }
+
         const mergeDashboards = (dashboard) => {
             if (dashboard) {
-                const pushUniqueTasks = (taskArray) => {
+                const pushUniqueTasks = (taskArray, categoryName) => {
                     taskArray.forEach(task => {
-                        if (!uniqueTaskIds.has(task._id.toString())) {
+                        const taskDate = new Date(task.date);  // Ensure task.date is a Date object
+                        if (!uniqueTaskIds.has(task._id.toString()) && taskDate >= startDate && taskDate <= endDate) {
                             uniqueTaskIds.add(task._id.toString());
-                            combinedDashboard[taskArray.name].push(task);
+                            combinedDashboard[categoryName].push(task);
                         }
                     });
                 };
 
-                if (dashboard.Backlog) {
-                    dashboard.Backlog.name = 'Backlog';
-                    pushUniqueTasks(dashboard.Backlog);
-                }
-                if (dashboard.Todo) {
-                    dashboard.Todo.name = 'Todo';
-                    pushUniqueTasks(dashboard.Todo);
-                }
-                if (dashboard.Inprogress) {
-                    dashboard.Inprogress.name = 'InProgress';
-                    pushUniqueTasks(dashboard.Inprogress);
-                }
-                if (dashboard.Done) {
-                    dashboard.Done.name = 'Done';
-                    pushUniqueTasks(dashboard.Done);
-                }
+                if (dashboard.Backlog) pushUniqueTasks(dashboard.Backlog, 'Backlog');
+                if (dashboard.Todo) pushUniqueTasks(dashboard.Todo, 'Todo');
+                if (dashboard.Inprogress) pushUniqueTasks(dashboard.Inprogress, 'InProgress');
+                if (dashboard.Done) pushUniqueTasks(dashboard.Done, 'Done');
             }
         };
 
-        if (userDashboard) {
-            mergeDashboards(userDashboard);
-        }
+        if (userDashboard) mergeDashboards(userDashboard);
 
         const assignedDashboards = await Dashboard.find({ Access: createdByUserId });
+        assignedDashboards.forEach(assignedDashboard => mergeDashboards(assignedDashboard));
 
-        assignedDashboards.forEach(assignedDashboard => {
-            mergeDashboards(assignedDashboard);
-        });
+        // Check if any tasks were added to combinedDashboard
+        const hasTasks =
+            combinedDashboard.Todo.length > 0 ||
+            combinedDashboard.InProgress.length > 0 ||
+            combinedDashboard.Backlog.length > 0 ||
+            combinedDashboard.Done.length > 0;
 
-        if (
-            combinedDashboard.Todo.length === 0 &&
-            combinedDashboard.InProgress.length === 0 &&
-            combinedDashboard.Backlog.length === 0 &&
-            combinedDashboard.Done.length === 0
-        ) {
+        if (!hasTasks) {
             return res.status(200).json({
                 message: "No dashboards found for this user",
                 data: {
-                    dashboard: {},
+                    dashboard: combinedDashboard,
                     userName,
                     email: req.user
-
                 }
             });
         }
@@ -93,12 +95,13 @@ router.get("/board", authMiddleware, async (req, res) => {
         console.error("Error fetching dashboard data:", error);
         res.status(500).json({ message: "Internal Server error" });
     }
-});
+})
+
 
 
 router.post("/create", authMiddleware, async (req, res) => {
     const { title, priority, assignTo, dueDate, checklist } = req.body;
-    
+
     const createdByUserId = (await getUserIdByEmail(req.user)).toString();
     const user = await User.findById(createdByUserId).select('name');
     const userName = user ? user.name : "Unknown User";
@@ -318,7 +321,7 @@ router.get('/analytics', authMiddleware, async (req, res) => {
             Inprogress: [],
             Done: []
         };
-    
+
         const mergeDashboards = (dashboard) => {
             if (dashboard) {
                 combinedDashboard.Backlog.push(...(dashboard.Backlog || []));
@@ -327,15 +330,15 @@ router.get('/analytics', authMiddleware, async (req, res) => {
                 combinedDashboard.Done.push(...(dashboard.Done || []));
             }
         };
-    
+
         const userDashboard = await Dashboard.findOne({ createdBy: new mongoose.Types.ObjectId(createdByUserId) });
         mergeDashboards(userDashboard);
-    
+
         const assignedDashboards = await Dashboard.find({ Access: createdByUserId });
         assignedDashboards.forEach(assignedDashboard => {
             mergeDashboards(assignedDashboard);
         });
-    
+
         const removeDuplicates = (tasks) => {
             const uniqueTasks = new Map();
             tasks.forEach(task => {
@@ -343,12 +346,12 @@ router.get('/analytics', authMiddleware, async (req, res) => {
             });
             return Array.from(uniqueTasks.values());
         };
-    
+
         combinedDashboard.Backlog = removeDuplicates(combinedDashboard.Backlog);
         combinedDashboard.Todo = removeDuplicates(combinedDashboard.Todo);
         combinedDashboard.Inprogress = removeDuplicates(combinedDashboard.Inprogress);
         combinedDashboard.Done = removeDuplicates(combinedDashboard.Done);
-    
+
         const analytics = {
             totalBacklogTasks: combinedDashboard.Backlog.length,
             totalTodoTasks: combinedDashboard.Todo.length,
@@ -357,9 +360,9 @@ router.get('/analytics', authMiddleware, async (req, res) => {
             lowPriorityTasks: 0,
             moderatePriorityTasks: 0,
             highPriorityTasks: 0,
-            pastDueTasks: 0 
+            pastDueTasks: 0
         };
-    
+
         const countTaskProperties = (tasks) => {
             const currentDate = new Date();
             tasks.forEach(task => {
@@ -370,18 +373,18 @@ router.get('/analytics', authMiddleware, async (req, res) => {
                 } else if (task.priority === 'high') {
                     analytics.highPriorityTasks++;
                 }
-    
+
                 if (task.date && task.date < currentDate) {
                     analytics.pastDueTasks++;
                 }
             });
         };
-    
+
         countTaskProperties(combinedDashboard.Backlog);
         countTaskProperties(combinedDashboard.Todo);
         countTaskProperties(combinedDashboard.Inprogress);
         countTaskProperties(combinedDashboard.Done);
-    
+
         res.status(200).json({
             message: "Data fetched successfully",
             data: analytics
@@ -390,7 +393,7 @@ router.get('/analytics', authMiddleware, async (req, res) => {
         console.error("Error fetching analytics data:", error);
         res.status(500).json({ message: "Internal Server error" });
     }
-    
+
 
 })
 
