@@ -97,7 +97,8 @@ router.get("/board", authMiddleware, async (req, res) => {
 
 
 router.post("/create", authMiddleware, async (req, res) => {
-    const { title, priority, assignTo, date, checklist } = req.body;
+    const { title, priority, assignTo, dueDate, checklist } = req.body;
+    console.log("dueDate",dueDate)
     const createdByUserId = (await getUserIdByEmail(req.user)).toString();
     const user = await User.findById(createdByUserId).select('name');
     const userName = user ? user.name : "Unknown User";
@@ -130,7 +131,7 @@ router.post("/create", authMiddleware, async (req, res) => {
             title,
             priority,
             assignTo: userId ? new mongoose.Types.ObjectId(userId) : null,
-            date,
+            date: dueDate,
             checkList: formattedCheckList,
             createdBy: createdByUserId
         };
@@ -147,7 +148,10 @@ router.post("/create", authMiddleware, async (req, res) => {
         res.status(201).json({
             message: "Card added to Todo", data: {
                 dashboard,
-                userName
+                userName,
+                email: req.user
+
+
             }
         });
     } catch (error) {
@@ -181,7 +185,11 @@ router.put("/updateTaskStatus", authMiddleware, async (req, res) => {
                 await dashboard.save();
 
                 taskFound = true;
-                return res.status(200).json({ message: "Task status updated successfully", data: { dashboard, userName } });
+                return res.status(200).json({
+                    message: "Task status updated successfully", data: {
+                        dashboard, userName, email: req.user
+                    }
+                });
             }
         }
         if (!taskFound) {
@@ -194,7 +202,7 @@ router.put("/updateTaskStatus", authMiddleware, async (req, res) => {
 });
 
 router.put("/UpdateTask", authMiddleware, async (req, res) => {
-    const { taskId, fromArray, taskData } = req.body;
+    const { taskId, fromArray, taskData, dueDate } = req.body;
     console.log("req.body", { taskId, fromArray, taskData });
 
     try {
@@ -213,12 +221,18 @@ router.put("/UpdateTask", authMiddleware, async (req, res) => {
                 const task = dashboard[fromArray][taskIndex];
                 task.title = taskData.title;
                 task.priority = taskData.priority;
+                task.date = taskData.dueDate;
                 task.checkList = taskData.checkList;
 
                 await dashboard.save();
                 taskUpdated = true;
 
-                return res.status(200).json({ message: "Task updated successfully", data: { dashboard, userName } });
+                return res.status(200).json({
+                    message: "Task updated successfully", data: {
+                        dashboard, userName,
+                        email: req.user
+                    }
+                });
             }
         }
 
@@ -270,7 +284,7 @@ router.delete("/deleteTask", authMiddleware, async (req, res) => {
 });
 
 router.get("/getTask", async (req, res) => {
-    const {taskId, fromArray} = req.query
+    const { taskId, fromArray } = req.query
     try {
         const dashboards = await Dashboard.find();
 
