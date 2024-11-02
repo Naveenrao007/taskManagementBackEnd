@@ -9,7 +9,6 @@ const { getUserIdByEmail } = require("../utils/index")
 
 // registration  func
 router.post("/register", async (req, res) => {
-    console.log(req.body);
     const { name, email, password } = req.body;
     try {
         const isUserExists = await User.findOne({ email });
@@ -34,7 +33,6 @@ router.post("/register", async (req, res) => {
 // login  func
 router.post("/login", async (req, res) => {
     const { email, password } = req.body;
-    console.log({ email, password })
     try {
         const user = await User.findOne({ email });
         if (!user) {
@@ -57,7 +55,6 @@ router.post("/login", async (req, res) => {
 router.get("/all", authMiddleware, async (req, res) => {
     try {
         const users = await User.find().select("-password -_id -__v")
-        console.log("users", users)
         res.status(200).json({ users: users })
     } catch (error) {
         res.status(500).json({ error: "An error occurred while fetching users." });

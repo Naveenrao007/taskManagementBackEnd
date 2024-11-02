@@ -98,7 +98,7 @@ router.get("/board", authMiddleware, async (req, res) => {
 
 router.post("/create", authMiddleware, async (req, res) => {
     const { title, priority, assignTo, dueDate, checklist } = req.body;
-    console.log("dueDate",dueDate)
+    
     const createdByUserId = (await getUserIdByEmail(req.user)).toString();
     const user = await User.findById(createdByUserId).select('name');
     const userName = user ? user.name : "Unknown User";
@@ -113,7 +113,6 @@ router.post("/create", authMiddleware, async (req, res) => {
     if (assignTo) {
         try {
             userId = await getUserIdByEmail(assignTo);
-            console.log("User ID:", userId);
         } catch (error) {
             console.error("Error fetching user ID:", error);
             return res.status(500).json({ message: "Error fetching user ID" });
@@ -177,7 +176,6 @@ router.put("/updateTaskStatus", authMiddleware, async (req, res) => {
             const taskIndex = dashboard[fromArray].findIndex(task => task._id.toString() === taskId);
             if (taskIndex !== -1) {
                 const task = dashboard[fromArray][taskIndex];
-                console.log("Task found:", task);
 
                 dashboard[fromArray].splice(taskIndex, 1);
                 dashboard[toArray].push(task);
@@ -203,7 +201,6 @@ router.put("/updateTaskStatus", authMiddleware, async (req, res) => {
 
 router.put("/UpdateTask", authMiddleware, async (req, res) => {
     const { taskId, fromArray, taskData, dueDate } = req.body;
-    console.log("req.body", { taskId, fromArray, taskData });
 
     try {
         const createdByUserId = (await getUserIdByEmail(req.user)).toString();
@@ -248,7 +245,6 @@ router.put("/UpdateTask", authMiddleware, async (req, res) => {
 
 
 router.delete("/deleteTask", authMiddleware, async (req, res) => {
-    console.log(req.body);
     const { taskId, fromArray } = req.body;
 
     try {
@@ -303,7 +299,6 @@ router.get("/getTask", async (req, res) => {
         }
 
         if (foundTask) {
-            console.log("Task found:", foundTask);
             return res.status(200).json({ message: "Task retrieved successfully", data: foundTask });
         } else {
             return res.status(404).json({ message: "Task not found in any dashboard" });
@@ -314,10 +309,94 @@ router.get("/getTask", async (req, res) => {
     }
 
 });
+router.get('/analytics', authMiddleware, async (req, res) => {
+    try {
+        const createdByUserId = (await getUserIdByEmail(req.user)).toString();
+        const combinedDashboard = {
+            Backlog: [],
+            Todo: [],
+            Inprogress: [],
+            Done: []
+        };
+    
+        const mergeDashboards = (dashboard) => {
+            if (dashboard) {
+                combinedDashboard.Backlog.push(...(dashboard.Backlog || []));
+                combinedDashboard.Todo.push(...(dashboard.Todo || []));
+                combinedDashboard.Inprogress.push(...(dashboard.Inprogress || []));
+                combinedDashboard.Done.push(...(dashboard.Done || []));
+            }
+        };
+    
+        const userDashboard = await Dashboard.findOne({ createdBy: new mongoose.Types.ObjectId(createdByUserId) });
+        mergeDashboards(userDashboard);
+    
+        const assignedDashboards = await Dashboard.find({ Access: createdByUserId });
+        assignedDashboards.forEach(assignedDashboard => {
+            mergeDashboards(assignedDashboard);
+        });
+    
+        const removeDuplicates = (tasks) => {
+            const uniqueTasks = new Map();
+            tasks.forEach(task => {
+                uniqueTasks.set(task._id.toString(), task);
+            });
+            return Array.from(uniqueTasks.values());
+        };
+    
+        combinedDashboard.Backlog = removeDuplicates(combinedDashboard.Backlog);
+        combinedDashboard.Todo = removeDuplicates(combinedDashboard.Todo);
+        combinedDashboard.Inprogress = removeDuplicates(combinedDashboard.Inprogress);
+        combinedDashboard.Done = removeDuplicates(combinedDashboard.Done);
+    
+        const analytics = {
+            totalBacklogTasks: combinedDashboard.Backlog.length,
+            totalTodoTasks: combinedDashboard.Todo.length,
+            totalInprogressTasks: combinedDashboard.Inprogress.length,
+            totalDoneTasks: combinedDashboard.Done.length,
+            lowPriorityTasks: 0,
+            moderatePriorityTasks: 0,
+            highPriorityTasks: 0,
+            pastDueTasks: 0 
+        };
+    
+        const countTaskProperties = (tasks) => {
+            const currentDate = new Date();
+            tasks.forEach(task => {
+                if (task.priority === 'low') {
+                    analytics.lowPriorityTasks++;
+                } else if (task.priority === 'mid') {
+                    analytics.moderatePriorityTasks++;
+                } else if (task.priority === 'high') {
+                    analytics.highPriorityTasks++;
+                }
+    
+                if (task.date && task.date < currentDate) {
+                    analytics.pastDueTasks++;
+                }
+            });
+        };
+    
+        countTaskProperties(combinedDashboard.Backlog);
+        countTaskProperties(combinedDashboard.Todo);
+        countTaskProperties(combinedDashboard.Inprogress);
+        countTaskProperties(combinedDashboard.Done);
+    
+        res.status(200).json({
+            message: "Data fetched successfully",
+            data: analytics
+        });
+    } catch (error) {
+        console.error("Error fetching analytics data:", error);
+        res.status(500).json({ message: "Internal Server error" });
+    }
+    
+
+})
+
 
 router.post("/adduser", authMiddleware, async (req, res) => {
     const { email } = req.body;
-    console.log("Logged-in user:", req.user);
 
     try {
         const createdByUserId = await getUserIdByEmail(req.user);
@@ -351,6 +430,7 @@ router.post("/adduser", authMiddleware, async (req, res) => {
     }
 
 });
+
 
 
 module.exports = router;
